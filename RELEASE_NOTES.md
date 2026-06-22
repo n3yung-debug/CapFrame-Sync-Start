@@ -1,28 +1,28 @@
-## CapFrame Sync Start v1.0.0
+## CapFrame Sync Start v1.0.1
 
-Hands-off synchronized CapFrameX capture for the Rust benchmark demo. Starts —
-and stops — every capture at the identical point in the demo (just before the
-first rocket), regardless of how long the demo takes to load.
+Reliability fixes for triggering and a required detection-check step.
 
-### How it works
-- Detects the **loading-screen-end transition** on screen (robust to variable
-  load time) and confirms the demo is playing, so a desktop→loading flash can't
-  false-trigger.
-- Waits the fixed in-demo offset and fires the **CapFrameX capture hotkey** just
-  before the rocket, then stops it at the demo's end.
+### Changed
+- **Two-part activation** — run the script, then press the **ARM hotkey
+  (`F8`) while the loading screen is showing**. This fixes the previous
+  instant/false triggering (the old auto-detector could fire on desktop/menu
+  activity before the demo even loaded).
+- **Baseline-divergence detection** — arming snapshots the loading screen, and
+  the capture fires the instant the screen changes away from it (the demo
+  starting). More reliable than the earlier motion heuristic.
+- **Capture hotkey default is now `[`** (`CAPTURE_HOTKEY` / `STOP_HOTKEY`).
+- **`--tune` is now a guided pass/fail detection check** — it measures the
+  loading-screen reading and the jump when the demo starts, then reports a
+  RESULT and a recommended `DIVERGENCE_THRESHOLD`. Documented as the required
+  first step before your first real capture.
 
-### Measured from the reference demo
-- Loading ends at ~22.92 s → first rocket flash at 37.20 s
-- **Rocket offset ≈ 14.3 s** after loading ends
-- **Capture duration ≈ 178 s** (3:12 demo − ~14 s)
-
-### Included
-- `sync_capture.py` — hands-off run, plus `--calibrate` (re-measure offset) and
-  `--tune` (verify detection thresholds)
-- `requirements.txt`, `README.md`
+### Unchanged (from the reference demo)
+- Rocket offset ≈ 14.3 s after loading ends; capture duration ≈ 178 s.
 
 ### Setup
 1. `pip install -r requirements.txt`
-2. Set the CapFrameX capture hotkey (match `CAPTURE_HOTKEY`); set Capture Time to
-   0 so the script can toggle stop.
-3. Run `python sync_capture.py`, then start your demo. Done.
+2. Set the CapFrameX capture hotkey to match `CAPTURE_HOTKEY` (`[`); set Capture
+   Time to 0 so the script can toggle stop.
+3. **Verify detection:** `python sync_capture.py --tune` (arm on the loading
+   screen with `F8`, let the demo start, follow the RESULT).
+4. Run `python sync_capture.py`, press `F8` on the loading screen, done.
