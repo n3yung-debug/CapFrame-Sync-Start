@@ -49,18 +49,40 @@ relative to the loading screen you armed on.
    pip install -r requirements.txt
    ```
 3. **In CapFrameX** (Settings):
-   - Set a **Capture Hotkey** (e.g. `F11`), and set `CAPTURE_HOTKEY` to match.
+   - Note your **Capture Hotkey** — the default in this script is `[` (set
+     `CAPTURE_HOTKEY` / `STOP_HOTKEY` to match yours).
    - Set **Capture Time** to **0 / manual** so the hotkey can both start and
      stop (the script sends it twice). *Or* leave Capture Time at ~`178 s` and
      set `STOP_HOTKEY = None` in the script to let CapFrameX stop itself.
 4. Pick an **`ARM_HOTKEY`** (default `F8`) — a key you'll press on the loading
-   screen. The measured values above are already set; confirm `ROCKET_OFFSET_S`
-   with `--calibrate`.
+   screen (must be different from the capture key).
+5. **Verify detection on your machine (required first run)** — see the next
+   section. This is the most important step: it confirms the tool can actually
+   tell when *your* demo's loading screen ends, and sets the right threshold.
 
 > On Windows, open the terminal **as administrator** so the keyboard library is
 > allowed to send the hotkey to the game/CapFrameX.
 
-## Run a synced capture (every test)
+## Step 1 — Verify detection (`--tune`), do this first
+
+```
+python sync_capture.py --tune
+```
+
+1. Start your demo. When the **loading screen** appears, press **`F8`**.
+2. Stay on the loading screen for ~1.5 s while it measures.
+3. Let the demo start. The tool reports:
+   - how steady the loading screen read (should be low),
+   - how big the jump was when the demo started, and
+   - a **RESULT** (reliable / marginal) plus a **recommended
+     `DIVERGENCE_THRESHOLD`**.
+
+If it says *Good separation*, you're set — update `DIVERGENCE_THRESHOLD` to the
+recommended value if it differs. If *Marginal*, set `REGION` to a steadier part
+of the screen (away from overlays/animations) and run it again. Then re-run once
+more to confirm it catches the load-end cleanly before relying on it.
+
+## Step 2 — Run a synced capture (every test)
 
 ```
 python sync_capture.py
@@ -87,18 +109,6 @@ python sync_capture.py --calibrate
 Press **`F8`** on the loading screen; the tool detects when it ends, then you
 press **Enter** the instant the rocket fires. It prints the measured
 `ROCKET_OFFSET_S` and the capture duration. Run it a couple of times and average.
-
-## If detection misfires (`--tune`)
-
-```
-python sync_capture.py --tune
-```
-
-Press **`F8`** on the loading screen, then watch the live `diff` value. It should
-read **~0** while the loading screen is up, and **jump high** (well above
-`DIVERGENCE_THRESHOLD`) the instant the demo starts. If it never jumps, lower
-`DIVERGENCE_THRESHOLD`; if it reads high even on the loading screen, raise it or
-set `REGION` to a steadier area.
 
 ## Config reference (top of `sync_capture.py`)
 

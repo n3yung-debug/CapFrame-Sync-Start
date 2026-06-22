@@ -33,9 +33,9 @@ How it works
 
 Usage
 -----
+  python sync_capture.py --tune       FIRST: verify detection on your machine
   python sync_capture.py              Run a synchronized capture
   python sync_capture.py --calibrate  Re-measure the rocket offset
-  python sync_capture.py --tune       Show live difference from the baseline
 
 Requirements:  pip install -r requirements.txt   (mss, numpy, keyboard)
 On Windows, run from a terminal opened "as administrator" so the keyboard
@@ -53,13 +53,13 @@ import keyboard
 # ============================== CONFIG =======================================
 
 # CapFrameX capture hotkey. Must match CapFrameX > Settings > Capture Hotkey.
-# Examples: "f11", "f12", "ctrl+f11", "shift+f12".
-CAPTURE_HOTKEY = "f11"
+# Examples: "[", "f11", "f12", "ctrl+f11".
+CAPTURE_HOTKEY = "["
 
 # Hotkey to STOP the capture. With CapFrameX's "Capture Time" set to 0 (manual),
 # the capture hotkey toggles, so the same key stops it. Set to None to let
 # CapFrameX's own Capture Time stop the capture instead.
-STOP_HOTKEY = "f11"
+STOP_HOTKEY = "["
 
 # Hotkey you press, while the LOADING SCREEN is visible, to arm detection.
 ARM_HOTKEY = "f8"
@@ -163,6 +163,8 @@ def run():
     print(f"  Capture duration : {duration:.1f} s")
     print(f"  Stop             : "
           f"{'script sends ' + STOP_HOTKEY if STOP_HOTKEY else 'CapFrameX Capture Time'}")
+    print("  (First time? Run 'python sync_capture.py --tune' to verify "
+          "detection.)")
 
     with mss.mss() as sct:
         region = get_region(sct)
@@ -209,25 +211,59 @@ def calibrate():
 
 
 def tune():
-    """Arm on the loading screen, then show live difference from the snapshot."""
-    print("TUNE: arm on the loading screen, then watch the live difference.\n"
-          "It should read ~0 while the loading screen is up, and jump well\n"
-          "above DIVERGENCE_THRESHOLD the instant the demo starts. Ctrl+C to stop.")
+    """Verify detection works on THIS machine and recommend a threshold.
+
+    Run this once before your first real capture. It measures how steady the
+    loading screen reads and how big the jump is when the demo starts, then
+    tells you whether detection is reliable and what DIVERGENCE_THRESHOLD to use.
+    """
+    print("DETECTION CHECK\n"
+          "This confirms the tool can tell when YOUR demo's loading screen ends.")
     with mss.mss() as sct:
         region = get_region(sct)
         arm("snapshot the loading screen")
         baseline = snapshot_baseline(sct, region)
+
+        # Phase 1: measure how steady the loading screen is (should be ~0).
+        print("   Hold on the loading screen, measuring (1.5 s)...")
+        noise = 0.0
+        t_end = time.perf_counter() + 1.5
+        while time.perf_counter() < t_end:
+            time.sleep(0.01)
+            diff = float(np.abs(grab_gray(sct, region) - baseline).mean())
+            noise = max(noise, diff)
+        print(f"   Loading-screen reading (max): {noise:.2f}")
+
+        # Phase 2: wait for the demo to start and capture the jump.
+        print("   Now let the demo start...")
+        detect_at = max(DIVERGENCE_THRESHOLD, noise * 3)
         peak = 0.0
-        try:
-            while True:
-                time.sleep(0.02)
-                cur = grab_gray(sct, region)
-                diff = float(np.abs(cur - baseline).mean())
-                peak = max(peak, diff)
-                bar = "#" * min(int(diff), 60)
-                print(f"\rdiff={diff:6.2f}  peak={peak:6.1f} | {bar:<60}", end="")
-        except KeyboardInterrupt:
-            print("\nDone.")
+        diverged_since = None
+        while True:
+            time.sleep(0.005)
+            diff = float(np.abs(grab_gray(sct, region) - baseline).mean())
+            peak = max(peak, diff)
+            bar = "#" * min(int(diff), 50)
+            print(f"\r   diff={diff:6.2f}  peak={peak:6.1f} | {bar:<50}", end="")
+            now = time.perf_counter()
+            if diff > detect_at:
+                diverged_since = diverged_since or now
+                if now - diverged_since >= DIVERGENCE_CONFIRM_S:
+                    break
+            else:
+                diverged_since = None
+
+        # Verdict + recommendation.
+        recommended = round(min(max(noise * 4, 10.0), peak * 0.5))
+        print("\n\n   --- Detection check ---")
+        print(f"   Loading screen read ~{noise:.1f}; demo start jumped to ~{peak:.0f}.")
+        if peak > max(noise * 5, 15):
+            print("   RESULT: Good separation - detection is reliable.")
+        else:
+            print("   RESULT: Marginal. Set REGION to a steadier area and retry.")
+        print(f"   Recommended:  DIVERGENCE_THRESHOLD = {recommended}")
+        if abs(recommended - DIVERGENCE_THRESHOLD) > 0.5:
+            print(f"   (currently {DIVERGENCE_THRESHOLD:.0f} - update it if you like)")
 
 
 if __name__ == "__main__":
