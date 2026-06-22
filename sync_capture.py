@@ -3,16 +3,19 @@ CapFrameX Sync Start
 ====================
 
 Starts your CapFrameX capture at the same point in every benchmark run, even
-though the demo takes a different amount of time to load each time.
+though the demo takes a different amount of time to load each time. Fully
+hands-off: no keypress during a run.
 
 How it works
 ------------
 The only thing that varies between runs is the load time. Once the demo is
 actually *playing*, the first rocket is fired at a fixed point in demo time
-(~13 s in). So this script:
+(~13 s in). The loading screen is static (no motion); gameplay has continuous
+motion. So this script:
 
-  1. Watches the screen for the loading screen to END (gameplay appears).
-     That is the stable anchor -- it ignores however long loading took.
+  1. Watches the screen and waits for a STATIC stretch (the loading screen)
+     followed by sustained MOTION -- that onset of motion is gameplay starting,
+     i.e. the moment loading ends. It ignores however long loading took.
   2. Waits the fixed in-demo offset to the rocket, minus a small lead, so the
      capture starts just BEFORE the shot.
   3. Sends your CapFrameX capture hotkey.
@@ -21,10 +24,10 @@ actually *playing*, the first rocket is fired at a fixed point in demo time
 
 Usage
 -----
-  python sync_capture.py            Run a synchronized capture
+  python sync_capture.py              Run a synchronized capture (hands-off)
   python sync_capture.py --calibrate  Measure your rocket offset (~13 s)
-  python sync_capture.py --tune       Show live detection values to set the
-                                       threshold for your loading screen
+  python sync_capture.py --tune       Show live motion values to set the
+                                       thresholds for your demo
 
 Requirements:  pip install -r requirements.txt   (mss, numpy, keyboard)
 On Windows, run from a terminal opened "as administrator" so the keyboard
@@ -60,14 +63,14 @@ DEMO_LENGTH_S = 192.0
 # Use None for the whole primary monitor (works well for loading -> gameplay).
 REGION = None
 
-# --- Detection tuning (defaults are sensible; adjust with --tune if needed) ---
-# Average pixel-difference (0-255) above which the screen is "no longer the
-# loading screen". Raise it if a loading animation causes false triggers.
-DIFF_THRESHOLD = 25.0
-# How many consecutive frames must exceed the threshold to confirm the change.
-STABLE_FRAMES = 5
-# Downscale factor for speed (every Nth pixel). Higher = faster, less precise.
-DOWNSCALE_STEP = 4
+# --- Detection tuning (defaults are sensible; check/adjust with --tune) -------
+# Frame-to-frame "motion" is the average pixel change (0-255) between frames.
+# Loading screen ~ near 0; gameplay ~ clearly higher.
+MOTION_THRESHOLD = 8.0     # motion above this counts as gameplay
+STATIC_THRESHOLD = 3.0     # motion below this counts as a static (loading) frame
+STATIC_SECONDS = 0.5       # how long it must stay static to qualify as loading
+MOTION_CONFIRM_SECONDS = 0.12  # how long motion must persist to confirm gameplay
+DOWNSCALE_STEP = 4         # speed: compare every Nth pixel
 
 # =============================================================================
 
@@ -87,43 +90,40 @@ def grab_gray(sct, region):
     return small.mean(axis=2)                      # grayscale
 
 
-def capture_baseline(sct, region, frames=10):
-    """Average a few frames of the (static) loading screen as the baseline."""
-    acc = None
-    for _ in range(frames):
-        g = grab_gray(sct, region)
-        acc = g if acc is None else acc + g
-        time.sleep(0.01)
-    return acc / frames
+def wait_for_gameplay(sct, region):
+    """Block until gameplay starts; return the time motion first began.
 
-
-def wait_for_loading_to_end(sct, region, baseline):
-    """Block until gameplay appears; return the time the change first began."""
-    consecutive = 0
-    first_exceed_t = None
+    Waits for a sustained static stretch (the loading screen), then for
+    sustained motion (gameplay). The first frame of that motion is the
+    load-end anchor.
+    """
+    prev = grab_gray(sct, region)
+    seen_static = False
+    static_since = None
+    motion_since = None
     while True:
-        g = grab_gray(sct, region)
-        diff = float(np.abs(g - baseline).mean())
-        if diff > DIFF_THRESHOLD:
-            if consecutive == 0:
-                first_exceed_t = time.perf_counter()   # start of the change
-            consecutive += 1
-            if consecutive >= STABLE_FRAMES:
-                return first_exceed_t
-        else:
-            consecutive = 0
-            first_exceed_t = None
         time.sleep(0.002)
+        cur = grab_gray(sct, region)
+        motion = float(np.abs(cur - prev).mean())
+        prev = cur
+        now = time.perf_counter()
 
-
-def arm(sct, region):
-    """Prompt the user to arm at the loading screen and grab the baseline."""
-    input("\n>> Start your demo. When the LOADING SCREEN is visible, "
-          "press Enter here to arm... ")
-    print("   Capturing loading-screen reference...")
-    baseline = capture_baseline(sct, region)
-    print("   Armed. Watching for gameplay to appear...")
-    return baseline
+        if not seen_static:
+            # First, confirm we're on a static screen (the loading screen).
+            if motion < STATIC_THRESHOLD:
+                static_since = static_since or now
+                if now - static_since >= STATIC_SECONDS:
+                    seen_static = True
+            else:
+                static_since = None
+        else:
+            # Then, wait for sustained motion -> gameplay has started.
+            if motion > MOTION_THRESHOLD:
+                motion_since = motion_since or now
+                if now - motion_since >= MOTION_CONFIRM_SECONDS:
+                    return motion_since          # onset of gameplay motion
+            else:
+                motion_since = None
 
 
 def fire_capture():
@@ -141,8 +141,9 @@ def run():
 
     with mss.mss() as sct:
         region = get_region(sct)
-        baseline = arm(sct, region)
-        t0 = wait_for_loading_to_end(sct, region, baseline)
+        print(">> Start your demo now. Watching for the loading screen "
+              "to end...")
+        t0 = wait_for_gameplay(sct, region)
         print(f"   Gameplay detected! Rocket in ~{start_offset:.2f} s...")
 
         fire_at = t0 + start_offset
@@ -153,13 +154,14 @@ def run():
 
 
 def calibrate():
-    """Detect load-end, then time how long until you say the rocket fired."""
-    print("CALIBRATION: we'll detect when gameplay starts, then you press "
-          "Enter the moment the first rocket fires.\n")
+    """Auto-detect load-end, then time how long until you mark the rocket."""
+    print("CALIBRATION: start your demo. The tool auto-detects when gameplay "
+          "begins, then you press Enter the moment the first rocket fires.\n")
     with mss.mss() as sct:
         region = get_region(sct)
-        baseline = arm(sct, region)
-        t0 = wait_for_loading_to_end(sct, region, baseline)
+        print(">> Start your demo now. Watching for the loading screen "
+              "to end...")
+        t0 = wait_for_gameplay(sct, region)
         print("   Gameplay detected! Watch closely...")
         input("   >> Press Enter the INSTANT the first rocket fires. ")
         offset = time.perf_counter() - t0
@@ -171,20 +173,22 @@ def calibrate():
 
 
 def tune():
-    """Print live diff values so you can pick DIFF_THRESHOLD for your screen."""
-    print("TUNE: showing live difference from the loading-screen baseline.\n"
-          "Loading screen should read LOW; gameplay should jump HIGH.\n"
-          "Pick a DIFF_THRESHOLD between the two. Ctrl+C to stop.\n")
+    """Print live motion values so you can set the detection thresholds."""
+    print("TUNE: showing live frame-to-frame motion.\n"
+          "Loading screen should read LOW (near 0); gameplay should read HIGH.\n"
+          "Set STATIC_THRESHOLD just above the loading value and "
+          "MOTION_THRESHOLD just below the gameplay value. Ctrl+C to stop.\n")
     with mss.mss() as sct:
         region = get_region(sct)
-        baseline = arm(sct, region)
+        prev = grab_gray(sct, region)
         try:
             while True:
-                g = grab_gray(sct, region)
-                diff = float(np.abs(g - baseline).mean())
-                bar = "#" * min(int(diff), 60)
-                print(f"\rdiff={diff:6.1f} | {bar:<60}", end="")
                 time.sleep(0.05)
+                cur = grab_gray(sct, region)
+                motion = float(np.abs(cur - prev).mean())
+                prev = cur
+                bar = "#" * min(int(motion), 60)
+                print(f"\rmotion={motion:6.1f} | {bar:<60}", end="")
         except KeyboardInterrupt:
             print("\nDone.")
 
@@ -194,7 +198,7 @@ if __name__ == "__main__":
     parser.add_argument("--calibrate", action="store_true",
                         help="measure your rocket offset")
     parser.add_argument("--tune", action="store_true",
-                        help="show live detection values")
+                        help="show live motion values")
     args = parser.parse_args()
 
     if args.calibrate:
