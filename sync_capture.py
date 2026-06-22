@@ -64,6 +64,11 @@ STOP_HOTKEY = "["
 # Hotkey you press, while the LOADING SCREEN is visible, to arm detection.
 ARM_HOTKEY = "f8"
 
+# Hotkey you press during --calibrate at the instant the rocket fires. This is a
+# global hook (works while the game is focused), unlike pressing Enter in the
+# terminal. Defaults to the arm key.
+MARK_HOTKEY = "f8"
+
 # Seconds from the moment the loading screen ends to the first rocket.
 # Measured from the reference video: 37.20 - 22.92 = 14.28 s.
 ROCKET_OFFSET_S = 14.3
@@ -195,13 +200,16 @@ def run():
 def calibrate():
     """Arm on the loading screen, then time how long until you mark the rocket."""
     print("CALIBRATION: arm on the loading screen; the tool detects when it "
-          "ends, then you press Enter the moment the first rocket fires.")
+          f"ends, then you press '{MARK_HOTKEY.upper()}' the moment the first "
+          "rocket fires.")
     with mss.mss() as sct:
         region = get_region(sct)
         arm()
         t0 = wait_for_load_end(sct, region)
-        print("   Loading ended! Watch closely...")
-        input("   >> Press Enter the INSTANT the first rocket fires. ")
+        print(f"   Loading ended! Press '{MARK_HOTKEY.upper()}' the INSTANT the "
+              "first rocket fires...")
+        time.sleep(0.4)                       # ignore any lingering arm keypress
+        keyboard.wait(MARK_HOTKEY)
         offset = time.perf_counter() - t0
         cap = DEMO_LENGTH_S - (offset - LEAD_S)
         print(f"\n   Measured rocket offset: {offset:.2f} s")
