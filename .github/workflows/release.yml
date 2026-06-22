@@ -1,0 +1,41 @@
+name: Release
+
+# Cuts a GitHub release from `main`. Run manually from the Actions tab
+# (or via API) since tags can't be pushed directly from the dev environment.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with release notes)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create or update the release from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "CapFrame Sync Start $TAG" \
+              --notes-file RELEASE_NOTES.md \
+              --target main
+          else
+            gh release create "$TAG" \
+              --title "CapFrame Sync Start $TAG" \
+              --notes-file RELEASE_NOTES.md \
+              --target main
+          fi
