@@ -107,8 +107,10 @@ python sync_capture.py --calibrate
 ```
 
 Press **`F8`** on the loading screen; the tool detects when it ends, then you
-press **Enter** the instant the rocket fires. It prints the measured
-`ROCKET_OFFSET_S` and the capture duration. Run it a couple of times and average.
+press **`F8`** again the instant the rocket fires (a global hotkey, so it works
+while the game is focused — unlike pressing Enter in the terminal). It prints the
+measured `ROCKET_OFFSET_S` and the capture duration. Run it a couple of times and
+average.
 
 ## Config reference (top of `sync_capture.py`)
 
